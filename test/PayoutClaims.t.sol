@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {PayoutClaims} from "../src/PayoutClaims.sol";
 
 contract MockStablecoin is ERC20 {
@@ -28,13 +29,8 @@ contract PayoutClaimsTest is Test {
         stablecoin = new MockStablecoin();
         serverSigner = vm.addr(SERVER_PK);
 
-        claims = new PayoutClaims(
-            address(stablecoin),
-            serverSigner,
-            CHECK_IN_AMOUNT,
-            MAX_DAILY_CHECK_INS,
-            address(this)
-        );
+        claims =
+            new PayoutClaims(address(stablecoin), serverSigner, CHECK_IN_AMOUNT, MAX_DAILY_CHECK_INS, address(this));
 
         stablecoin.mint(address(claims), INITIAL_FUNDING);
     }
@@ -129,29 +125,91 @@ contract PayoutClaimsTest is Test {
         claims.claimLeaderboardPayout(amount, claimId, 112, deadline, anotherSignature);
     }
 
-    function _signCheckIn(address user, uint256 day, uint256 nonce, uint256 deadline) internal view returns (bytes memory) {
+    function test_SignerCompromise_DrainsTreasuryAndBlocksLegitimateClaims() public {
+        address attacker = makeAddr("attacker");
+        uint256 deadline = block.timestamp + 1 hours;
+        uint256 treasuryBalance = stablecoin.balanceOf(address(claims));
+
+        bytes32 attackerClaimId = keccak256("compromised-signer-drain");
+        bytes memory attackerSignature = _signLeaderboard(attacker, treasuryBalance, attackerClaimId, 9001, deadline);
+
+        vm.prank(attacker);
+        claims.claimLeaderboardPayout(treasuryBalance, attackerClaimId, 9001, deadline, attackerSignature);
+
+        assertEq(stablecoin.balanceOf(attacker), treasuryBalance);
+        assertEq(stablecoin.balanceOf(address(claims)), 0);
+
+        address honestUser = makeAddr("honest-user");
+        uint256 day = claims.currentDay();
+        bytes memory honestSignature = _signCheckIn(honestUser, day, 9002, deadline);
+
+        vm.expectRevert(PayoutClaims.InsufficientContractBalance.selector);
+        vm.prank(honestUser);
+        claims.claimDailyCheckIn(day, 9002, deadline, honestSignature);
+    }
+
+    function test_LeaderboardClaim_CollisionAcrossUsersBlocksSecondValidClaim() public {
+        address userOne = makeAddr("leaderboard-user-one");
+        address userTwo = makeAddr("leaderboard-user-two");
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes32 sharedClaimId = keccak256("shared-claim-id");
+
+        uint256 userOneAmount = 12e18;
+        uint256 userTwoAmount = 34e18;
+
+        bytes memory userOneSignature = _signLeaderboard(userOne, userOneAmount, sharedClaimId, 1, deadline);
+        bytes memory userTwoSignature = _signLeaderboard(userTwo, userTwoAmount, sharedClaimId, 2, deadline);
+
+        vm.prank(userOne);
+        claims.claimLeaderboardPayout(userOneAmount, sharedClaimId, 1, deadline, userOneSignature);
+        assertEq(stablecoin.balanceOf(userOne), userOneAmount);
+
+        vm.expectRevert(PayoutClaims.LeaderboardClaimAlreadyUsed.selector);
+        vm.prank(userTwo);
+        claims.claimLeaderboardPayout(userTwoAmount, sharedClaimId, 2, deadline, userTwoSignature);
+        assertEq(stablecoin.balanceOf(userTwo), 0);
+    }
+
+    function test_OwnerWithdraw_OnlyOwnerCanWithdraw() public {
+        address attacker = makeAddr("attacker-withdraw");
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, attacker));
+
+        vm.prank(attacker);
+        claims.ownerWithdraw(attacker, 1e18);
+    }
+
+    function test_OwnerWithdraw_ValidatesRecipientAndBalance() public {
+        vm.expectRevert(PayoutClaims.ZeroAddress.selector);
+        claims.ownerWithdraw(address(0), 1e18);
+
+        uint256 overdrawAmount = stablecoin.balanceOf(address(claims)) + 1;
+        vm.expectRevert(PayoutClaims.InsufficientContractBalance.selector);
+        claims.ownerWithdraw(address(this), overdrawAmount);
+    }
+
+    function _signCheckIn(address user, uint256 day, uint256 nonce, uint256 deadline)
+        internal
+        view
+        returns (bytes memory)
+    {
         return _signCheckInWithPk(SERVER_PK, user, day, nonce, deadline);
     }
 
-    function _signCheckInWithPk(
-        uint256 signerPk,
-        address user,
-        uint256 day,
-        uint256 nonce,
-        uint256 deadline
-    ) internal view returns (bytes memory) {
+    function _signCheckInWithPk(uint256 signerPk, address user, uint256 day, uint256 nonce, uint256 deadline)
+        internal
+        view
+        returns (bytes memory)
+    {
         bytes32 digest = claims.hashCheckInClaim(user, day, nonce, deadline);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerPk, digest);
         return abi.encodePacked(r, s, v);
     }
 
-    function _signLeaderboard(
-        address user,
-        uint256 amount,
-        bytes32 claimId,
-        uint256 nonce,
-        uint256 deadline
-    ) internal view returns (bytes memory) {
+    function _signLeaderboard(address user, uint256 amount, bytes32 claimId, uint256 nonce, uint256 deadline)
+        internal
+        view
+        returns (bytes memory)
+    {
         bytes32 digest = claims.hashLeaderboardClaim(user, amount, claimId, nonce, deadline);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(SERVER_PK, digest);
         return abi.encodePacked(r, s, v);
