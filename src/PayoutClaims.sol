@@ -16,7 +16,7 @@ contract PayoutClaims is Ownable, ReentrancyGuard, EIP712 {
     bytes32 public constant LEADERBOARD_TYPEHASH =
         keccak256("LeaderboardClaim(address user,uint256 amount,bytes32 claimId,uint256 nonce,uint256 deadline)");
 
-    IERC20 public immutable payoutToken;
+    IERC20 public immutable PAYOUT_TOKEN;
     address public serverSigner;
 
     uint256 public checkInAmount;
@@ -80,7 +80,7 @@ contract PayoutClaims is Ownable, ReentrancyGuard, EIP712 {
         }
         if (initialCheckInAmount == 0 || initialMaxDailyCheckIns == 0) revert ZeroValue();
 
-        payoutToken = IERC20(token);
+        PAYOUT_TOKEN = IERC20(token);
         serverSigner = initialServerSigner;
         checkInAmount = initialCheckInAmount;
         maxDailyCheckIns = initialMaxDailyCheckIns;
@@ -110,7 +110,7 @@ contract PayoutClaims is Ownable, ReentrancyGuard, EIP712 {
         if (dailyCheckInCount[day] >= maxDailyCheckIns) revert DailyLimitReached();
         if (nonce != checkInNonces[user]) revert InvalidNonce();
 
-        bytes32 structHash = keccak256(abi.encode(CHECK_IN_TYPEHASH, user, day, nonce, deadline));
+        bytes32 structHash = _hashCheckInStruct(user, day, nonce, deadline);
         bytes32 digest = _hashTypedDataV4(structHash);
 
         _consumeAuthorizedDigest(digest, signature);
@@ -145,7 +145,7 @@ contract PayoutClaims is Ownable, ReentrancyGuard, EIP712 {
         if (usedLeaderboardClaimIds[claimId]) revert LeaderboardClaimAlreadyUsed();
         if (nonce != leaderboardNonces[user]) revert InvalidNonce();
 
-        bytes32 structHash = keccak256(abi.encode(LEADERBOARD_TYPEHASH, user, amount, claimId, nonce, deadline));
+        bytes32 structHash = _hashLeaderboardStruct(user, amount, claimId, nonce, deadline);
         bytes32 digest = _hashTypedDataV4(structHash);
 
         _consumeAuthorizedDigest(digest, signature);
@@ -202,7 +202,7 @@ contract PayoutClaims is Ownable, ReentrancyGuard, EIP712 {
         view
         returns (bytes32 digest)
     {
-        bytes32 structHash = keccak256(abi.encode(CHECK_IN_TYPEHASH, user, day, nonce, deadline));
+        bytes32 structHash = _hashCheckInStruct(user, day, nonce, deadline);
         return _hashTypedDataV4(structHash);
     }
 
@@ -218,8 +218,56 @@ contract PayoutClaims is Ownable, ReentrancyGuard, EIP712 {
         view
         returns (bytes32 digest)
     {
-        bytes32 structHash = keccak256(abi.encode(LEADERBOARD_TYPEHASH, user, amount, claimId, nonce, deadline));
+        bytes32 structHash = _hashLeaderboardStruct(user, amount, claimId, nonce, deadline);
         return _hashTypedDataV4(structHash);
+    }
+
+    /// @dev Computes the EIP-712 struct hash for a daily check-in claim using inline assembly.
+    /// @param user Recipient encoded in the struct.
+    /// @param day Epoch day encoded in the struct.
+    /// @param nonce Check-in nonce encoded in the struct.
+    /// @param deadline Expiration timestamp encoded in the struct.
+    /// @return structHash keccak256 hash of the encoded check-in struct.
+    function _hashCheckInStruct(address user, uint256 day, uint256 nonce, uint256 deadline)
+        internal
+        pure
+        returns (bytes32 structHash)
+    {
+        bytes32 typeHash = CHECK_IN_TYPEHASH;
+        assembly ("memory-safe") {
+            let ptr := mload(0x40)
+            mstore(ptr, typeHash)
+            mstore(add(ptr, 0x20), and(user, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF))
+            mstore(add(ptr, 0x40), day)
+            mstore(add(ptr, 0x60), nonce)
+            mstore(add(ptr, 0x80), deadline)
+            structHash := keccak256(ptr, 0xA0)
+        }
+    }
+
+    /// @dev Computes the EIP-712 struct hash for a leaderboard claim using inline assembly.
+    /// @param user Recipient encoded in the struct.
+    /// @param amount Amount encoded in the struct.
+    /// @param claimId Claim identifier encoded in the struct.
+    /// @param nonce Leaderboard nonce encoded in the struct.
+    /// @param deadline Expiration timestamp encoded in the struct.
+    /// @return structHash keccak256 hash of the encoded leaderboard struct.
+    function _hashLeaderboardStruct(address user, uint256 amount, bytes32 claimId, uint256 nonce, uint256 deadline)
+        internal
+        pure
+        returns (bytes32 structHash)
+    {
+        bytes32 typeHash = LEADERBOARD_TYPEHASH;
+        assembly ("memory-safe") {
+            let ptr := mload(0x40)
+            mstore(ptr, typeHash)
+            mstore(add(ptr, 0x20), and(user, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF))
+            mstore(add(ptr, 0x40), amount)
+            mstore(add(ptr, 0x60), claimId)
+            mstore(add(ptr, 0x80), nonce)
+            mstore(add(ptr, 0xA0), deadline)
+            structHash := keccak256(ptr, 0xC0)
+        }
     }
 
     /// @dev Validates signer authorization and marks the digest as used to prevent replay.
@@ -238,7 +286,7 @@ contract PayoutClaims is Ownable, ReentrancyGuard, EIP712 {
     /// @param to Recipient address for token transfer.
     /// @param amount Amount of tokens to transfer.
     function _payout(address to, uint256 amount) internal {
-        if (payoutToken.balanceOf(address(this)) < amount) revert InsufficientContractBalance();
-        payoutToken.safeTransfer(to, amount);
+        if (PAYOUT_TOKEN.balanceOf(address(this)) < amount) revert InsufficientContractBalance();
+        PAYOUT_TOKEN.safeTransfer(to, amount);
     }
 }

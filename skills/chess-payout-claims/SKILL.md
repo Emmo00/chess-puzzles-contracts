@@ -5,7 +5,7 @@ license: Apache-2.0
 compatibility: Requires EVM RPC access, an ethers-compatible backend signer, and optional Foundry/cast tooling for operational scripts.
 metadata:
   author: project-team
-  version: "2.1.0"
+  version: "2.2.0"
 ---
 
 # Chess Payout Claims Integration Skill
@@ -32,6 +32,12 @@ The claims contract has two user claim paths:
 - Leaderboard claims: variable payout, one-time claim ID
 
 It verifies backend-issued EIP-712 signatures and transfers ERC20 payouts to users.
+
+Nonce model:
+
+- Check-in claims use checkInNonces(user)
+- Leaderboard claims use leaderboardNonces(user)
+- Nonce spaces are independent per claim type
 
 ## Sponsored Transaction Model
 
@@ -73,7 +79,7 @@ Collect and store these values in your backend config:
 ## Daily Check-In Flow
 
 1. Backend computes the current day as Unix days: floor(timestamp / 86400).
-2. Backend reads on-chain nonces(user) from the claims contract.
+2. Backend reads on-chain checkInNonces(user) from the claims contract.
 3. Backend creates a payload with user, day, nonce, deadline.
 4. Backend signs the payload with EIP-712 typed data.
 5. Frontend sends signed payload to backend or relayer service.
@@ -84,13 +90,13 @@ Required payload fields:
 
 - user: claimant address
 - day: UTC day number
-- nonce: exact current on-chain nonces(user)
+- nonce: exact current on-chain checkInNonces(user)
 - deadline: Unix timestamp expiry
 
 ## Leaderboard Claim Flow
 
 1. Backend computes user reward amount and claim ID.
-2. Backend reads on-chain nonces(user) from the claims contract.
+2. Backend reads on-chain leaderboardNonces(user) from the claims contract.
 3. Backend creates payload with user, amount, claimId, nonce, deadline.
 4. Backend signs with EIP-712 typed data.
 5. Relayer submits on-chain leaderboard claim.
@@ -101,14 +107,15 @@ Required payload fields:
 - user: claimant address
 - amount: payout token amount in base units
 - claimId: unique identifier for payout record
-- nonce: exact current on-chain nonces(user)
+- nonce: exact current on-chain leaderboardNonces(user)
 - deadline: Unix timestamp expiry
 
 Nonce notes:
 
-- nonces mapping is shared across daily and leaderboard claims
-- Any successful claim increments nonces(user) by 1
-- Signatures must be generated with the next expected nonce for that user
+- checkInNonces and leaderboardNonces are separate mappings
+- Daily check-ins increment checkInNonces(user) only
+- Leaderboard claims increment leaderboardNonces(user) only
+- Signatures must be generated from the correct nonce domain for the claim type
 
 ## Revenue Collector Flow
 
@@ -146,7 +153,7 @@ Client and backend should handle these contract reverts as product states:
 
 - SignatureExpired: claim link/request expired
 - InvalidSigner: backend signature mismatch or wrong signer key
-- InvalidNonce: signed nonce does not match current nonces(user)
+- InvalidNonce: signed nonce does not match current checkInNonces(user) or leaderboardNonces(user)
 - AlreadyClaimedToday: daily claim already used by this user
 - DailyLimitReached: first-N daily cap exhausted
 - LeaderboardClaimAlreadyUsed: payout already consumed
@@ -157,11 +164,15 @@ Client and backend should handle these contract reverts as product states:
 
 - Keep signing key in KMS/HSM and never in frontend apps
 - Use short signature validity windows
-- Use unique claim IDs and always source nonce from on-chain nonces(user)
+- Use unique claim IDs and always source nonce from the correct on-chain nonce mapping
 - Rotate signer key periodically and on suspicion
 - Apply relayer rate limits and idempotency controls
 - Monitor unusually large leaderboard amounts
 - Require multisig for owner-level treasury actions
+
+## Read API Notes
+
+- The payout token immutable getter is PAYOUT_TOKEN() (uppercase) in the current claims contract version.
 
 ## Code Examples
 
