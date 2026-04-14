@@ -184,6 +184,30 @@ contract PayoutClaimsTest is Test {
         claims.claimDailyCheckIn(user, day, nonce, deadline, signature);
     }
 
+    function test_NonceDomains_AreIndependentAcrossClaimTypes() public {
+        address user = makeAddr("nonce-domain-user");
+        uint256 day = claims.currentDay();
+        uint256 deadline = block.timestamp + 1 hours;
+
+        uint256 leaderboardAmount = 5e18;
+        bytes32 leaderboardClaimId = keccak256("nonce-domain-claim");
+        bytes memory leaderboardSignature = _signLeaderboard(user, leaderboardAmount, leaderboardClaimId, 0, deadline);
+
+        vm.prank(relayer);
+        claims.claimLeaderboardPayout(user, leaderboardAmount, leaderboardClaimId, 0, deadline, leaderboardSignature);
+
+        assertEq(claims.leaderboardNonces(user), 1);
+        assertEq(claims.checkInNonces(user), 0);
+
+        bytes memory checkInSignature = _signCheckIn(user, day, 0, deadline);
+
+        vm.prank(relayer);
+        claims.claimDailyCheckIn(user, day, 0, deadline, checkInSignature);
+
+        assertEq(claims.checkInNonces(user), 1);
+        assertEq(claims.leaderboardNonces(user), 1);
+    }
+
     function test_OwnerWithdraw_OnlyOwnerCanWithdraw() public {
         address attacker = makeAddr("attacker-withdraw");
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, attacker));
