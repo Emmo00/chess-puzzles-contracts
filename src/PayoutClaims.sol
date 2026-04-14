@@ -24,12 +24,25 @@ contract PayoutClaims is Ownable, ReentrancyGuard, EIP712 {
 
     mapping(uint256 day => uint256 count) public dailyCheckInCount;
     mapping(uint256 day => mapping(address user => bool hasClaimed)) public hasClaimedDailyCheckIn;
+    mapping(address user => uint256 nonce) public nonces;
     mapping(bytes32 digest => bool used) public usedDigests;
     mapping(bytes32 claimId => bool used) public usedLeaderboardClaimIds;
 
-    event DailyCheckInClaimed(uint256 indexed day, address indexed user, uint256 amount, uint256 nonce, bytes32 digest);
+    event DailyCheckInClaimed(
+        uint256 indexed day,
+        address indexed user,
+        address indexed relayer,
+        uint256 amount,
+        uint256 nonce,
+        bytes32 digest
+    );
     event LeaderboardClaimed(
-        bytes32 indexed claimId, address indexed user, uint256 amount, uint256 nonce, bytes32 digest
+        bytes32 indexed claimId,
+        address indexed user,
+        address indexed relayer,
+        uint256 amount,
+        uint256 nonce,
+        bytes32 digest
     );
     event ServerSignerUpdated(address indexed previousSigner, address indexed newSigner);
     event CheckInAmountUpdated(uint256 previousAmount, uint256 newAmount);
@@ -41,6 +54,7 @@ contract PayoutClaims is Ownable, ReentrancyGuard, EIP712 {
     error InvalidSigner();
     error SignatureExpired();
     error InvalidCheckInDay();
+    error InvalidNonce();
     error AlreadyClaimedToday();
     error DailyLimitReached();
     error DigestAlreadyUsed();
@@ -69,47 +83,56 @@ contract PayoutClaims is Ownable, ReentrancyGuard, EIP712 {
         return block.timestamp / 1 days;
     }
 
-    function claimDailyCheckIn(uint256 day, uint256 nonce, uint256 deadline, bytes calldata signature)
+    function claimDailyCheckIn(address user, uint256 day, uint256 nonce, uint256 deadline, bytes calldata signature)
         external
         nonReentrant
     {
+        if (user == address(0)) revert ZeroAddress();
         if (deadline < block.timestamp) revert SignatureExpired();
         if (day != currentDay()) revert InvalidCheckInDay();
-        if (hasClaimedDailyCheckIn[day][msg.sender]) revert AlreadyClaimedToday();
+        if (hasClaimedDailyCheckIn[day][user]) revert AlreadyClaimedToday();
         if (dailyCheckInCount[day] >= maxDailyCheckIns) revert DailyLimitReached();
+        if (nonce != nonces[user]) revert InvalidNonce();
 
-        bytes32 structHash = keccak256(abi.encode(CHECK_IN_TYPEHASH, msg.sender, day, nonce, deadline));
+        bytes32 structHash = keccak256(abi.encode(CHECK_IN_TYPEHASH, user, day, nonce, deadline));
         bytes32 digest = _hashTypedDataV4(structHash);
 
         _consumeAuthorizedDigest(digest, signature);
 
-        hasClaimedDailyCheckIn[day][msg.sender] = true;
+        hasClaimedDailyCheckIn[day][user] = true;
         unchecked {
             dailyCheckInCount[day] += 1;
+            nonces[user] += 1;
         }
 
-        _payout(msg.sender, checkInAmount);
-        emit DailyCheckInClaimed(day, msg.sender, checkInAmount, nonce, digest);
+        _payout(user, checkInAmount);
+        emit DailyCheckInClaimed(day, user, msg.sender, checkInAmount, nonce, digest);
     }
 
     function claimLeaderboardPayout(
+        address user,
         uint256 amount,
         bytes32 claimId,
         uint256 nonce,
         uint256 deadline,
         bytes calldata signature
     ) external nonReentrant {
+        if (user == address(0)) revert ZeroAddress();
         if (deadline < block.timestamp) revert SignatureExpired();
         if (usedLeaderboardClaimIds[claimId]) revert LeaderboardClaimAlreadyUsed();
+        if (nonce != nonces[user]) revert InvalidNonce();
 
-        bytes32 structHash = keccak256(abi.encode(LEADERBOARD_TYPEHASH, msg.sender, amount, claimId, nonce, deadline));
+        bytes32 structHash = keccak256(abi.encode(LEADERBOARD_TYPEHASH, user, amount, claimId, nonce, deadline));
         bytes32 digest = _hashTypedDataV4(structHash);
 
         _consumeAuthorizedDigest(digest, signature);
 
         usedLeaderboardClaimIds[claimId] = true;
-        _payout(msg.sender, amount);
-        emit LeaderboardClaimed(claimId, msg.sender, amount, nonce, digest);
+        unchecked {
+            nonces[user] += 1;
+        }
+        _payout(user, amount);
+        emit LeaderboardClaimed(claimId, user, msg.sender, amount, nonce, digest);
     }
 
     function setServerSigner(address newSigner) external onlyOwner {

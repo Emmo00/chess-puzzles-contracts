@@ -24,10 +24,12 @@ contract PayoutClaimsTest is Test {
     MockStablecoin internal stablecoin;
     PayoutClaims internal claims;
     address internal serverSigner;
+    address internal relayer;
 
     function setUp() public {
         stablecoin = new MockStablecoin();
         serverSigner = vm.addr(SERVER_PK);
+        relayer = makeAddr("relayer");
 
         claims =
             new PayoutClaims(address(stablecoin), serverSigner, CHECK_IN_AMOUNT, MAX_DAILY_CHECK_INS, address(this));
@@ -40,12 +42,12 @@ contract PayoutClaimsTest is Test {
 
         for (uint256 i = 0; i < MAX_DAILY_CHECK_INS; i++) {
             address user = address(uint160(i + 1));
-            uint256 nonce = i + 1;
+            uint256 nonce = 0;
             uint256 deadline = block.timestamp + 1 hours;
             bytes memory signature = _signCheckIn(user, day, nonce, deadline);
 
-            vm.prank(user);
-            claims.claimDailyCheckIn(day, nonce, deadline, signature);
+            vm.prank(relayer);
+            claims.claimDailyCheckIn(user, day, nonce, deadline, signature);
 
             assertEq(stablecoin.balanceOf(user), CHECK_IN_AMOUNT);
         }
@@ -54,56 +56,56 @@ contract PayoutClaimsTest is Test {
         assertEq(stablecoin.balanceOf(address(claims)), INITIAL_FUNDING - (MAX_DAILY_CHECK_INS * CHECK_IN_AMOUNT));
 
         address user101 = address(uint160(101));
-        uint256 nonce101 = 101;
+        uint256 nonce101 = 0;
         uint256 deadline101 = block.timestamp + 1 hours;
         bytes memory signature101 = _signCheckIn(user101, day, nonce101, deadline101);
 
         vm.expectRevert(PayoutClaims.DailyLimitReached.selector);
-        vm.prank(user101);
-        claims.claimDailyCheckIn(day, nonce101, deadline101, signature101);
+        vm.prank(relayer);
+        claims.claimDailyCheckIn(user101, day, nonce101, deadline101, signature101);
     }
 
     function test_DailyCheckIn_CannotClaimTwiceSameDay() public {
         address user = makeAddr("alice");
         uint256 day = claims.currentDay();
 
-        bytes memory signature1 = _signCheckIn(user, day, 1, block.timestamp + 1 hours);
+        bytes memory signature1 = _signCheckIn(user, day, 0, block.timestamp + 1 hours);
 
-        vm.prank(user);
-        claims.claimDailyCheckIn(day, 1, block.timestamp + 1 hours, signature1);
+        vm.prank(relayer);
+        claims.claimDailyCheckIn(user, day, 0, block.timestamp + 1 hours, signature1);
 
         bytes memory signature2 = _signCheckIn(user, day, 2, block.timestamp + 1 hours);
 
         vm.expectRevert(PayoutClaims.AlreadyClaimedToday.selector);
-        vm.prank(user);
-        claims.claimDailyCheckIn(day, 2, block.timestamp + 1 hours, signature2);
+        vm.prank(relayer);
+        claims.claimDailyCheckIn(user, day, 2, block.timestamp + 1 hours, signature2);
     }
 
     function test_DailyCheckIn_RequiresAuthorizedSigner() public {
         address user = makeAddr("bob");
         uint256 day = claims.currentDay();
-        uint256 nonce = 10;
+        uint256 nonce = 0;
         uint256 deadline = block.timestamp + 1 hours;
 
         uint256 wrongSignerPk = 0xBEEF;
         bytes memory badSignature = _signCheckInWithPk(wrongSignerPk, user, day, nonce, deadline);
 
         vm.expectRevert(PayoutClaims.InvalidSigner.selector);
-        vm.prank(user);
-        claims.claimDailyCheckIn(day, nonce, deadline, badSignature);
+        vm.prank(relayer);
+        claims.claimDailyCheckIn(user, day, nonce, deadline, badSignature);
     }
 
     function test_DailyCheckIn_RevertsOnExpiredSignature() public {
         address user = makeAddr("carol");
         uint256 day = claims.currentDay();
-        uint256 nonce = 99;
+        uint256 nonce = 0;
         uint256 deadline = block.timestamp - 1;
 
         bytes memory signature = _signCheckIn(user, day, nonce, deadline);
 
         vm.expectRevert(PayoutClaims.SignatureExpired.selector);
-        vm.prank(user);
-        claims.claimDailyCheckIn(day, nonce, deadline, signature);
+        vm.prank(relayer);
+        claims.claimDailyCheckIn(user, day, nonce, deadline, signature);
     }
 
     function test_LeaderboardClaim_SuccessAndClaimIdSingleUse() public {
@@ -112,17 +114,17 @@ contract PayoutClaimsTest is Test {
         bytes32 claimId = keccak256("leaderboard-epoch-1-place-1");
         uint256 deadline = block.timestamp + 1 hours;
 
-        bytes memory signature = _signLeaderboard(user, amount, claimId, 111, deadline);
+        bytes memory signature = _signLeaderboard(user, amount, claimId, 0, deadline);
 
-        vm.prank(user);
-        claims.claimLeaderboardPayout(amount, claimId, 111, deadline, signature);
+        vm.prank(relayer);
+        claims.claimLeaderboardPayout(user, amount, claimId, 0, deadline, signature);
 
         assertEq(stablecoin.balanceOf(user), amount);
 
-        bytes memory anotherSignature = _signLeaderboard(user, amount, claimId, 112, deadline);
+        bytes memory anotherSignature = _signLeaderboard(user, amount, claimId, 1, deadline);
         vm.expectRevert(PayoutClaims.LeaderboardClaimAlreadyUsed.selector);
-        vm.prank(user);
-        claims.claimLeaderboardPayout(amount, claimId, 112, deadline, anotherSignature);
+        vm.prank(relayer);
+        claims.claimLeaderboardPayout(user, amount, claimId, 1, deadline, anotherSignature);
     }
 
     function test_SignerCompromise_DrainsTreasuryAndBlocksLegitimateClaims() public {
@@ -131,21 +133,21 @@ contract PayoutClaimsTest is Test {
         uint256 treasuryBalance = stablecoin.balanceOf(address(claims));
 
         bytes32 attackerClaimId = keccak256("compromised-signer-drain");
-        bytes memory attackerSignature = _signLeaderboard(attacker, treasuryBalance, attackerClaimId, 9001, deadline);
+        bytes memory attackerSignature = _signLeaderboard(attacker, treasuryBalance, attackerClaimId, 0, deadline);
 
-        vm.prank(attacker);
-        claims.claimLeaderboardPayout(treasuryBalance, attackerClaimId, 9001, deadline, attackerSignature);
+        vm.prank(relayer);
+        claims.claimLeaderboardPayout(attacker, treasuryBalance, attackerClaimId, 0, deadline, attackerSignature);
 
         assertEq(stablecoin.balanceOf(attacker), treasuryBalance);
         assertEq(stablecoin.balanceOf(address(claims)), 0);
 
         address honestUser = makeAddr("honest-user");
         uint256 day = claims.currentDay();
-        bytes memory honestSignature = _signCheckIn(honestUser, day, 9002, deadline);
+        bytes memory honestSignature = _signCheckIn(honestUser, day, 0, deadline);
 
         vm.expectRevert(PayoutClaims.InsufficientContractBalance.selector);
-        vm.prank(honestUser);
-        claims.claimDailyCheckIn(day, 9002, deadline, honestSignature);
+        vm.prank(relayer);
+        claims.claimDailyCheckIn(honestUser, day, 0, deadline, honestSignature);
     }
 
     function test_LeaderboardClaim_CollisionAcrossUsersBlocksSecondValidClaim() public {
@@ -157,17 +159,29 @@ contract PayoutClaimsTest is Test {
         uint256 userOneAmount = 12e18;
         uint256 userTwoAmount = 34e18;
 
-        bytes memory userOneSignature = _signLeaderboard(userOne, userOneAmount, sharedClaimId, 1, deadline);
-        bytes memory userTwoSignature = _signLeaderboard(userTwo, userTwoAmount, sharedClaimId, 2, deadline);
+        bytes memory userOneSignature = _signLeaderboard(userOne, userOneAmount, sharedClaimId, 0, deadline);
+        bytes memory userTwoSignature = _signLeaderboard(userTwo, userTwoAmount, sharedClaimId, 0, deadline);
 
-        vm.prank(userOne);
-        claims.claimLeaderboardPayout(userOneAmount, sharedClaimId, 1, deadline, userOneSignature);
+        vm.prank(relayer);
+        claims.claimLeaderboardPayout(userOne, userOneAmount, sharedClaimId, 0, deadline, userOneSignature);
         assertEq(stablecoin.balanceOf(userOne), userOneAmount);
 
         vm.expectRevert(PayoutClaims.LeaderboardClaimAlreadyUsed.selector);
-        vm.prank(userTwo);
-        claims.claimLeaderboardPayout(userTwoAmount, sharedClaimId, 2, deadline, userTwoSignature);
+        vm.prank(relayer);
+        claims.claimLeaderboardPayout(userTwo, userTwoAmount, sharedClaimId, 0, deadline, userTwoSignature);
         assertEq(stablecoin.balanceOf(userTwo), 0);
+    }
+
+    function test_DailyCheckIn_RevertsOnInvalidNonce() public {
+        address user = makeAddr("nonce-user");
+        uint256 day = claims.currentDay();
+        uint256 nonce = 1;
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory signature = _signCheckIn(user, day, nonce, deadline);
+
+        vm.expectRevert(PayoutClaims.InvalidNonce.selector);
+        vm.prank(relayer);
+        claims.claimDailyCheckIn(user, day, nonce, deadline, signature);
     }
 
     function test_OwnerWithdraw_OnlyOwnerCanWithdraw() public {
