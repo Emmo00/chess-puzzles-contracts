@@ -1,66 +1,138 @@
-## Foundry
+# Chess Payout Claims Contracts
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+Foundry project for sponsored ERC20 reward claims on Celo, with EIP-712 backend signing.
 
-Foundry consists of:
+## Contracts
 
-- **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
-- **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
-- **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
-- **Chisel**: Fast, utilitarian, and verbose solidity REPL.
+- `src/PayoutClaims.sol`
+	- Daily check-in claims (fixed amount, one claim per user per UTC day, global daily cap)
+	- Leaderboard claims (variable amount, globally single-use `claimId`)
+	- EIP-712 signature verification with replay protection (`usedDigests`)
+	- Independent nonce domains:
+		- `checkInNonces(user)` for daily check-ins
+		- `leaderboardNonces(user)` for leaderboard payouts
 
-## Documentation
+- `src/SubscriptionReceiver.sol` (`StablecoinReceiver`)
+	- ERC20 deposit receiver
+	- Owner-controlled withdrawals and treasury sweeps
 
-https://book.getfoundry.sh/
+## Claim Design
 
-## Usage
+The claims contract is designed for relayed/sponsored transactions:
 
-### Build
+1. Backend reads nonce state from chain.
+2. Backend signs typed data with the server signer key.
+3. Relayer submits the claim transaction.
+4. Contract validates signer, nonce, deadline, and replay constraints.
+5. Tokens are transferred to `user`.
 
-```shell
-$ forge build
+EIP-712 domain used by `PayoutClaims`:
+
+- `name`: `MiniPayPayoutClaims`
+- `version`: `1`
+- `chainId`: deployment chain ID
+- `verifyingContract`: deployed claims contract address
+
+Typed structs:
+
+- `CheckInClaim(address user,uint256 day,uint256 nonce,uint256 deadline)`
+- `LeaderboardClaim(address user,uint256 amount,bytes32 claimId,uint256 nonce,uint256 deadline)`
+
+## Local Setup
+
+Install dependencies (already vendored in this repo):
+
+```bash
+forge --version
 ```
 
-### Test
+Build:
 
-```shell
-$ forge test
+```bash
+forge build
 ```
 
-### Format
+Run all tests:
 
-```shell
-$ forge fmt
+```bash
+forge test -vv
 ```
 
-### Gas Snapshots
+Run payout tests only:
 
-```shell
-$ forge snapshot
+```bash
+forge test --match-contract PayoutClaimsTest -vvv
 ```
 
-### Anvil
+## Deploy PayoutClaims
 
-```shell
-$ anvil
+Deployment script: `script/PayoutClaims.s.sol`
+
+Required environment variables:
+
+- `PRIVATE_KEY`: deployer key
+- `PAYOUT_TOKEN`: ERC20 token used for payouts
+- `SERVER_SIGNER`: backend signer address for EIP-712 claims
+- `CHECK_IN_AMOUNT`: daily payout amount in token base units
+- `MAX_DAILY_CHECK_INS`: max successful daily claims per UTC day
+- `OWNER`: owner of the deployed contract
+
+Example:
+
+```bash
+export PRIVATE_KEY=0x...
+export PAYOUT_TOKEN=0x...
+export SERVER_SIGNER=0x...
+export CHECK_IN_AMOUNT=10000000000000000
+export MAX_DAILY_CHECK_INS=100
+export OWNER=0x...
+
+forge script script/PayoutClaims.s.sol:PayoutClaimsScript \
+	--rpc-url $RPC_URL \
+	--broadcast
 ```
 
-### Deploy
+## Backend Signing Example
 
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
+Example signer script: `script/ethers-signing-example.mjs`
+
+Install `ethers` if needed:
+
+```bash
+npm install ethers
 ```
 
-### Cast
+Required env vars for signing script:
 
-```shell
-$ cast <subcommand>
+- `CLAIMS_CONTRACT`
+- `USER_ADDRESS`
+- `SERVER_PRIVATE_KEY`
+- Optional: `CHAIN_ID` (defaults to `42220`)
+
+Sign a check-in payload:
+
+```bash
+node script/ethers-signing-example.mjs checkin
 ```
 
-### Help
+Sign a leaderboard payload:
 
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
+```bash
+node script/ethers-signing-example.mjs leaderboard
+```
+
+## Operational Notes
+
+- Fund `PayoutClaims` with payout tokens before opening claims.
+- If the signer key is compromised, funds can be drained; rotate signer immediately with `setServerSigner`.
+- `claimId` is globally single-use for leaderboard claims.
+- Daily check-in uses `day = block.timestamp / 1 days` and enforces same-day claims only.
+- Owner can recover funds with `ownerWithdraw`.
+
+## Useful Commands
+
+```bash
+forge fmt
+forge snapshot
+cast --help
 ```
