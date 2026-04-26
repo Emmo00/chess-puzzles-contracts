@@ -15,25 +15,14 @@ contract ChessPuzzlesStoreTest is Test {
     }
 
     function testSetDailyPuzzle() public {
-        string[] memory moves = new string[](2);
-        moves[0] = "e2e4";
-        moves[1] = "e7e5";
-
         vm.prank(server);
-        store.setDailyPuzzle(20240424, "p1", "fen1", 1500, moves, 100, 1000);
+        store.setDailyPuzzle(20240424, "p1", 100, 1000);
 
-        (string memory puzzleId, string memory fen, uint256 rating, uint256 rewardAmount, uint256 maxCheckIns) = store.dailyPuzzles(20240424);
+        (string memory puzzleId, uint256 rewardAmount, uint256 maxCheckIns) = store.dailyPuzzles(20240424);
         
         assertEq(puzzleId, "p1");
-        assertEq(fen, "fen1");
-        assertEq(rating, 1500);
         assertEq(rewardAmount, 100);
         assertEq(maxCheckIns, 1000);
-
-        string[] memory storedMoves = store.getDailyPuzzleMoves(20240424);
-        assertEq(storedMoves.length, 2);
-        assertEq(storedMoves[0], "e2e4");
-        assertEq(storedMoves[1], "e7e5");
     }
 
     function testSetReservation() public {
@@ -60,10 +49,9 @@ contract ChessPuzzlesStoreTest is Test {
     }
 
     function test_RevertWhen_UnauthorizedSetDailyPuzzle() public {
-        string[] memory moves = new string[](0);
         vm.prank(user);
         vm.expectRevert();
-        store.setDailyPuzzle(20240424, "p1", "fen1", 1500, moves, 100, 1000);
+        store.setDailyPuzzle(20240424, "p1", 100, 1000);
     }
 
     function test_RevertWhen_UnauthorizedSetReservation() public {
@@ -84,10 +72,9 @@ contract ChessPuzzlesStoreTest is Test {
         store.grantRole(serverRole, user);
 
         vm.prank(user);
-        string[] memory moves = new string[](0);
-        store.setDailyPuzzle(20240424, "p1", "fen1", 1500, moves, 100, 1000);
+        store.setDailyPuzzle(20240424, "p1", 100, 1000);
         
-        (string memory puzzleId,,,,) = store.dailyPuzzles(20240424);
+        (string memory puzzleId,,) = store.dailyPuzzles(20240424);
         assertEq(puzzleId, "p1");
     }
 }

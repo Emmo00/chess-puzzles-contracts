@@ -23,9 +23,6 @@ contract ChessPuzzlesStore is AccessControl {
 
     struct DailyPuzzle {
         string puzzleId;
-        string fen;
-        uint256 rating;
-        string[] moves;
         uint256 rewardAmount;
         uint256 maxCheckIns;
     }
@@ -52,7 +49,7 @@ contract ChessPuzzlesStore is AccessControl {
     // Mapping from puzzleId => userAddress => UserPuzzleAttempt
     mapping(string => mapping(address => UserPuzzleAttempt)) public puzzleAttempts;
 
-    event DailyPuzzleSet(uint256 indexed utcDay, string puzzleId, uint256 rating);
+    event DailyPuzzleSet(uint256 indexed utcDay, string puzzleId);
     event ReservationSet(uint256 indexed utcDay, address indexed user, ReservationStatus status);
     event PuzzleAttemptRecorded(string indexed puzzleId, address indexed user, bool completed);
 
@@ -65,30 +62,21 @@ contract ChessPuzzlesStore is AccessControl {
      * @notice Sets or updates the daily puzzle for a specific day.
      * @param utcDay The unique day identifier (e.g., UTC epoch day).
      * @param puzzleId Lichess puzzle ID.
-     * @param fen FEN string of the starting position.
-     * @param rating Difficulty rating.
-     * @param moves Moves in UCI format.
      * @param rewardAmount Reward in wei for this puzzle.
      * @param maxCheckIns Max allowed check-ins for this day.
      */
     function setDailyPuzzle(
         uint256 utcDay,
         string calldata puzzleId,
-        string calldata fen,
-        uint256 rating,
-        string[] calldata moves,
         uint256 rewardAmount,
         uint256 maxCheckIns
     ) external onlyRole(SERVER_ROLE) {
         dailyPuzzles[utcDay] = DailyPuzzle({
             puzzleId: puzzleId,
-            fen: fen,
-            rating: rating,
-            moves: moves,
             rewardAmount: rewardAmount,
             maxCheckIns: maxCheckIns
         });
-        emit DailyPuzzleSet(utcDay, puzzleId, rating);
+        emit DailyPuzzleSet(utcDay, puzzleId);
     }
 
     /**
@@ -140,11 +128,4 @@ contract ChessPuzzlesStore is AccessControl {
         emit PuzzleAttemptRecorded(puzzleId, user, completed);
     }
 
-    /**
-     * @notice Returns the moves for a specific daily puzzle.
-     * @param utcDay The day of the puzzle.
-     */
-    function getDailyPuzzleMoves(uint256 utcDay) external view returns (string[] memory) {
-        return dailyPuzzles[utcDay].moves;
-    }
 }
