@@ -16,6 +16,12 @@ Foundry project for sponsored ERC20 reward claims on Celo, with EIP-712 backend 
 	- ERC20 deposit receiver
 	- Owner-controlled withdrawals and treasury sweeps
 
+- `src/ChessPuzzlesStore.sol`
+	- Stores daily puzzle IDs and reward metadata
+	- Tracks user reservations for daily challenges
+	- Records all user puzzle attempts and points
+	- Restricted to authorized `SERVER_ROLE` wallets
+
 ## Claim Design
 
 The claims contract is designed for relayed/sponsored transactions:
@@ -128,6 +134,13 @@ node script/ethers-signing-example.mjs leaderboard
 - `claimId` is globally single-use for leaderboard claims.
 - Daily check-in uses `day = block.timestamp / 1 days` and enforces same-day claims only.
 - Owner can recover funds with `ownerWithdraw`.
+
+## Integration Skills
+
+Detailed integration guides for backend and frontend developers:
+
+- [Chess Payout Claims Skill](skills/chess-payout-claims/SKILL.md): Signed claim flows and treasury operations.
+- [Chess Puzzles Store Skill](skills/chess-puzzles-store/SKILL.md): Managing puzzle state and user progress.
 
 ## Useful Commands
 
