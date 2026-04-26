@@ -19,7 +19,7 @@ contract ChessPuzzlesStoreTest is Test {
         store.setDailyPuzzle(20240424, "p1", 100, 1000);
 
         (string memory puzzleId, uint256 rewardAmount, uint256 maxCheckIns) = store.dailyPuzzles(20240424);
-        
+
         assertEq(puzzleId, "p1");
         assertEq(rewardAmount, 100);
         assertEq(maxCheckIns, 1000);
@@ -29,9 +29,10 @@ contract ChessPuzzlesStoreTest is Test {
         vm.prank(server);
         store.setReservation(20240424, user, ChessPuzzlesStore.ReservationStatus.Pending, 100, 0);
 
-        (ChessPuzzlesStore.ReservationStatus status, uint256 rewardAmount, uint256 solvedAt) = store.reservations(20240424, user);
-        
-        assertEq(uint(status), uint(ChessPuzzlesStore.ReservationStatus.Pending));
+        (ChessPuzzlesStore.ReservationStatus status, uint256 rewardAmount, uint256 solvedAt) =
+            store.reservations(20240424, user);
+
+        assertEq(uint256(status), uint256(ChessPuzzlesStore.ReservationStatus.Pending));
         assertEq(rewardAmount, 100);
         assertEq(solvedAt, 0);
     }
@@ -41,7 +42,7 @@ contract ChessPuzzlesStoreTest is Test {
         store.recordPuzzleAttempt(user, "p1", true, 1, 10, 123456789);
 
         (bool completed, uint256 attempts, uint256 points, uint256 solvedAt) = store.puzzleAttempts("p1", user);
-        
+
         assertTrue(completed);
         assertEq(attempts, 1);
         assertEq(points, 10);
@@ -73,7 +74,7 @@ contract ChessPuzzlesStoreTest is Test {
 
         vm.prank(user);
         store.setDailyPuzzle(20240424, "p1", 100, 1000);
-        
+
         (string memory puzzleId,,) = store.dailyPuzzles(20240424);
         assertEq(puzzleId, "p1");
     }

@@ -65,17 +65,11 @@ contract ChessPuzzlesStore is AccessControl {
      * @param rewardAmount Reward in wei for this puzzle.
      * @param maxCheckIns Max allowed check-ins for this day.
      */
-    function setDailyPuzzle(
-        uint256 utcDay,
-        string calldata puzzleId,
-        uint256 rewardAmount,
-        uint256 maxCheckIns
-    ) external onlyRole(SERVER_ROLE) {
-        dailyPuzzles[utcDay] = DailyPuzzle({
-            puzzleId: puzzleId,
-            rewardAmount: rewardAmount,
-            maxCheckIns: maxCheckIns
-        });
+    function setDailyPuzzle(uint256 utcDay, string calldata puzzleId, uint256 rewardAmount, uint256 maxCheckIns)
+        external
+        onlyRole(SERVER_ROLE)
+    {
+        dailyPuzzles[utcDay] = DailyPuzzle({puzzleId: puzzleId, rewardAmount: rewardAmount, maxCheckIns: maxCheckIns});
         emit DailyPuzzleSet(utcDay, puzzleId);
     }
 
@@ -94,11 +88,8 @@ contract ChessPuzzlesStore is AccessControl {
         uint256 rewardAmount,
         uint256 solvedAt
     ) external onlyRole(SERVER_ROLE) {
-        reservations[utcDay][user] = CheckInReservation({
-            status: status,
-            rewardAmount: rewardAmount,
-            solvedAt: solvedAt
-        });
+        reservations[utcDay][user] =
+            CheckInReservation({status: status, rewardAmount: rewardAmount, solvedAt: solvedAt});
         emit ReservationSet(utcDay, user, status);
     }
 
@@ -120,12 +111,8 @@ contract ChessPuzzlesStore is AccessControl {
         uint256 solvedAt
     ) external onlyRole(SERVER_ROLE) {
         puzzleAttempts[puzzleId][user] = UserPuzzleAttempt({
-            completed: completed,
-            attempts: attempts,
-            points: points,
-            solvedAt: solvedAt
+            completed: completed, attempts: attempts, points: points, solvedAt: solvedAt
         });
         emit PuzzleAttemptRecorded(puzzleId, user, completed);
     }
-
 }
